@@ -1,113 +1,116 @@
 <template>
   <div id="container">
-    <div id="box" ref="box" :class="{'invissible-box':!devmode}">
-        <slot></slot>
+    <div id="box" ref="box" :class="{'invissible-box': !devmode}">
+      <slot></slot>
     </div>
     <div
-      v-for="(_corner, index) in [0,1,2,3,4,5,6,7,8]"
-        :key="index"
-        :id="'marker' + index"
-        :class="{invissible:!devmode,corner:true}"
-        @mousedown="startDrag($event, index)"
-      ></div>
+      v-for="(corner, index) in corners"
+      :key="index"
+      :id="'marker' + index"
+      :class="{ invissible: !devmode, corner: true }"
+      :style="{ left: corner.x + 'px', top: corner.y + 'px' }"
+      @mousedown="startDrag($event, index)"
+    ></div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue';
+import ContentDataService from '../services/ContentDataService.js';
 
-const box = ref(null)
-let corners = [50, 100, 300, 100, 100, 300, 300, 300];
-function adj(m) { // Compute the adjugate of m
+const box = ref(null);
+const corners = ref([
+  { x: 50, y: 100 },
+  { x: 300, y: 100 },
+  { x: 100, y: 300 },
+  { x: 300, y: 300 }
+]);
+
+function adj(m) {
   return [
     m[4] * m[8] - m[5] * m[7], m[2] * m[7] - m[1] * m[8], m[1] * m[5] - m[2] * m[4],
     m[5] * m[6] - m[3] * m[8], m[0] * m[8] - m[2] * m[6], m[2] * m[3] - m[0] * m[5],
     m[3] * m[7] - m[4] * m[6], m[1] * m[6] - m[0] * m[7], m[0] * m[4] - m[1] * m[3]
   ];
 }
-function multmm(a, b) { // multiply two matrices
-  var c = Array(9);
-  for (var i = 0; i != 3; ++i) {
-    for (var j = 0; j != 3; ++j) {
-      var cij = 0;
-      for (var k = 0; k != 3; ++k) {
-        cij += a[3 * i + k] * b[3 * k + j];
+
+function multmm(a, b) {
+  const c = Array(9).fill(0);
+  for (let i = 0; i < 3; ++i) {
+    for (let j = 0; j < 3; ++j) {
+      for (let k = 0; k < 3; ++k) {
+        c[3 * i + j] += a[3 * i + k] * b[3 * k + j];
       }
-      c[3 * i + j] = cij;
     }
   }
   return c;
 }
-function multmv(m, v) { // multiply matrix and vector
+
+function multmv(m, v) {
   return [
     m[0] * v[0] + m[1] * v[1] + m[2] * v[2],
     m[3] * v[0] + m[4] * v[1] + m[5] * v[2],
     m[6] * v[0] + m[7] * v[1] + m[8] * v[2]
   ];
 }
-function pdbg(m, v) {
-  var r = multmv(m, v);
-  return r + " (" + r[0] / r[2] + ", " + r[1] / r[2] + ")";
-}
+
 function basisToPoints(x1, y1, x2, y2, x3, y3, x4, y4) {
-  var m = [
+  const m = [
     x1, x2, x3,
     y1, y2, y3,
     1, 1, 1
   ];
-  var v = multmv(adj(m), [x4, y4, 1]);
+  const v = multmv(adj(m), [x4, y4, 1]);
   return multmm(m, [
     v[0], 0, 0,
     0, v[1], 0,
     0, 0, v[2]
   ]);
 }
-function general2DProjection(
-  x1s, y1s, x1d, y1d,
-  x2s, y2s, x2d, y2d,
-  x3s, y3s, x3d, y3d,
-  x4s, y4s, x4d, y4d
-) {
-  var s = basisToPoints(x1s, y1s, x2s, y2s, x3s, y3s, x4s, y4s);
-  var d = basisToPoints(x1d, y1d, x2d, y2d, x3d, y3d, x4d, y4d);
+
+function general2DProjection(x1s, y1s, x1d, y1d, x2s, y2s, x2d, y2d, x3s, y3s, x3d, y3d, x4s, y4s, x4d, y4d) {
+  const s = basisToPoints(x1s, y1s, x2s, y2s, x3s, y3s, x4s, y4s);
+  const d = basisToPoints(x1d, y1d, x2d, y2d, x3d, y3d, x4d, y4d);
   return multmm(d, adj(s));
 }
+
 function project(m, x, y) {
-  var v = multmv(m, [x, y, 1]);
+  const v = multmv(m, [x, y, 1]);
   return [v[0] / v[2], v[1] / v[2]];
 }
+
 function transform2d(elt, x1, y1, x2, y2, x3, y3, x4, y4) {
-  var w = elt.offsetWidth, h = elt.offsetHeight;
-  var t = general2DProjection
-    (0, 0, x1, y1, w, 0, x2, y2, 0, h, x3, y3, w, h, x4, y4);
-  for (let i = 0; i != 9; ++i) t[i] = t[i] / t[8];
-  t = [t[0], t[3], 0, t[6],
-  t[1], t[4], 0, t[7],
+  const w = elt.offsetWidth, h = elt.offsetHeight;
+  let t = general2DProjection(0, 0, x1, y1, w, 0, x2, y2, 0, h, x3, y3, w, h, x4, y4);
+  for (let i = 0; i < 9; ++i) t[i] = t[i] / t[8];
+  t = [
+    t[0], t[3], 0, t[6],
+    t[1], t[4], 0, t[7],
     0, 0, 1, 0,
-  t[2], t[5], 0, t[8]];
+    t[2], t[5], 0, t[8]
+  ];
   t = "matrix3d(" + t.join(", ") + ")";
-  elt.style["-webkit-transform"] = t;
-  elt.style["-moz-transform"] = t;
-  elt.style["-o-transform"] = t;
   elt.style.transform = t;
 }
+
 function update() {
-  var box = document.getElementById("box");
-  transform2d(box, corners[0], corners[1], corners[2], corners[3],
-    corners[4], corners[5], corners[6], corners[7]);
-  for (var i = 0; i != 8; i += 2) {
-    var elt = document.getElementById("marker" + i);
-    elt.style.left = corners[i] + "px";
-    elt.style.top = corners[i + 1] + "px";
+  const boxEl = box.value;
+  if (boxEl) {
+    transform2d(boxEl, corners.value[0].x, corners.value[0].y, corners.value[1].x, corners.value[1].y, corners.value[2].x, corners.value[2].y, corners.value[3].x, corners.value[3].y);
   }
 }
+
 function move(evnt) {
   if (currentcorner < 0) return;
-  corners[currentcorner] = evnt.pageX;
-  corners[currentcorner + 1] = evnt.pageY;
+  if(corners.value[0] && corners.value[1] && corners.value[2] && corners.value[3])
+    ContentDataService.setUpperScreenDistortion(corners.value);
+  console.log(corners.value);
+  corners.value[currentcorner] = { x: evnt.pageX, y: evnt.pageY };
   update();
 }
+
 let currentcorner = -1;
+
 window.addEventListener('load', function () {
   document.documentElement.style.margin = "0px";
   document.documentElement.style.padding = "0px";
@@ -115,41 +118,44 @@ window.addEventListener('load', function () {
   document.body.style.padding = "0px";
   update();
 });
-const startDrag =  (evnt, corner)=> {
+
+const startDrag = (evnt, corner) => {
   currentcorner = corner;
-}
-window.addEventListener('mouseup', function (evnt) {
+};
+
+window.addEventListener('mouseup', function () {
   currentcorner = -1;
-})
+});
+
 window.addEventListener('mousemove', move);
 
+const loadCorners = () => {
+  ContentDataService.getUpperScreenDistortion()
+    .then((response) => {
+      corners.value = response;
+      // console.log(response, corners.value);
+      update();
+    });
+};
+
 onMounted(() => {
-  // get the position of the container
-  const containerRect = box.value.getBoundingClientRect()
-  corners= {
-    0: containerRect.left,
-    1: containerRect.top,
-    2: containerRect.right,
-    3: containerRect.top,
-    4: containerRect.left,
-    5: containerRect.bottom,
-    6: containerRect.right,
-    7: containerRect.bottom
-  }
-  console.log(containerRect)
-})
+  loadCorners();
+
+  setInterval(() => {
+    if (currentcorner < 0) {
+      loadCorners();
+    }
+  }, 1000);
+});
 
 const devmode = ref(false);
 
-// check for keyboard event d
 window.addEventListener('keydown', function (evnt) {
   if (evnt.key === 'd') {
     devmode.value = !devmode.value;
-    console.log(devmode.value);
     update();
   }
-})
-
+});
 </script>
 
 <style scoped>
@@ -157,14 +163,13 @@ window.addEventListener('keydown', function (evnt) {
   position: relative;
   width: 100%;
   height: 100%;
-  /* overflow: clip; */
 }
 
 .invissible {
-  display: none!important;
+  display: none !important;
 }
 .invissible-box {
-    border:none!important;
+  outline: none !important;
 }
 
 #box {
@@ -173,16 +178,9 @@ window.addEventListener('keydown', function (evnt) {
   left: 0px;
   width: auto;
   height: auto;
-  border: 0.5px solid red;
+  outline: 0.5px solid red;
   transform-origin: 0 0;
-  -webkit-transform-origin: 0 0;
-  -moz-transform-origin: 0 0;
-  -o-transform-origin: 0 0;
 }
-/* #box img { */
-  /* width: 50%; */
-  /* height: auto  */
-/* } */
 
 .corner {
   display: block;
